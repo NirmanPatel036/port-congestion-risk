@@ -1,8 +1,5 @@
-"""Choose the High / Medium / Low cut-offs on member disagreement, using the validation weeks only.
+"""Choose the High / Medium / Low cut-offs on member disagreement, using the validation weeks only."""
 
-`python -m src.confidence` re-tunes an already trained model in place: the 5 members and the calibrator are
-untouched, only `confidence_cuts` in the bundle changes. `src.train` calls `tune` itself on new models.
-"""
 import argparse
 import itertools
 import json
