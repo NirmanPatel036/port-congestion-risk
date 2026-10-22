@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Port Congestion Risk</title>
+<meta name="description" content="Will a ship wait more than 24 hours for a berth? A forecast made 24 hours before arrival, from real AIS data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-top: #f0f9ff; --bg-mid: #e0f2fe; --bg-bottom: #ccfbf1;
+  --card: #ffffff; --text: #0f172a; --muted: #64748b; --border: #e2e8f0;
+  --accent: #0d9488; --accent-soft: rgba(20,184,166,.12);
+  --wave: #0ea5e9;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-top: #020617; --bg-mid: #0b2545; --bg-bottom: #0f3d3e;
+    --card: #0f1b2d; --text: #e2e8f0; --muted: #94a3b8; --border: #1e3a5f;
+    --accent: #2dd4bf; --accent-soft: rgba(45,212,191,.12);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: var(--text); line-height: 1.5;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='28' viewBox='0 0 160 28'%3E%3Cpath d='M0 14 Q 20 2 40 14 T 80 14 T 120 14 T 160 14' fill='none' stroke='%230ea5e9' stroke-opacity='0.10' stroke-width='2'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 40%, var(--bg-bottom) 100%);
+  background-attachment: fixed; min-height: 100vh;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 24px 16px 40px; }
+.hero { padding: 28px 30px; border-radius: 18px; color: #fff;
+  background: radial-gradient(1200px 300px at 0% 0%, #14b8a6 0%, transparent 60%), linear-gradient(120deg, #0f172a, #134e4a); }
+.hero h1 { font-size: clamp(24px, 4vw, 32px); margin: 6px 0 8px; letter-spacing: -0.02em; }
+.hero p { color: #cffafe; max-width: 760px; margin: 0; font-size: 15px; }
+.kicker { text-transform: uppercase; letter-spacing: .12em; font-size: 12px; color: #5eead4; font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.chips span { background: #ccfbf1; color: #134e4a; border: 1px solid #5eead4; padding: 4px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; }
+.controls { display: grid; grid-template-columns: 2fr 3fr; gap: 14px; margin-top: 18px; }
+.ship { margin-top: 14px; }
+label.lbl { display: block; font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+.hint { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+select, input[type=search] { width: 100%; font: inherit; color: var(--text); background: var(--card);
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; outline: none; }
+select:focus, input[type=search]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ship-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg button { font: inherit; font-size: 14px; padding: 9px 14px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--card); color: var(--text); }
+.seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.grid2 { display: grid; grid-template-columns: 5fr 4fr; gap: 14px; margin-top: 14px; }
+.grid-eq { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+.risk-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.risk-kicker { font-size: 13px; color: var(--muted); }
+.risk-word { font-weight: 600; font-size: 13px; padding: 3px 10px; border-radius: 999px; }
+.risk-value { font-size: 64px; font-weight: 700; line-height: 1.05; letter-spacing: -0.03em; margin: 8px 0 12px; }
+.bar { height: 10px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.bar span { display: block; height: 100%; border-radius: 999px; transition: width .3s ease; }
+.band-low .risk-value { color: #059669; } .band-low .bar span { background: #10b981; }
+.band-low .risk-word { background: rgba(16,185,129,.15); color: #059669; }
+.band-mid .risk-value { color: #d97706; } .band-mid .bar span { background: #f59e0b; }
+.band-mid .risk-word { background: rgba(245,158,11,.15); color: #d97706; }
+.band-high .risk-value { color: #dc2626; } .band-high .bar span { background: #ef4444; }
+.band-high .risk-word { background: rgba(239,68,68,.15); color: #dc2626; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.pill { font-size: 13px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border); }
+.conf-High { background: rgba(20,184,166,.15); border-color: rgba(20,184,166,.4); }
+.conf-Medium { background: rgba(148,163,184,.15); }
+.conf-Low { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.4); }
+.whatif-note { font-size: 12px; color: #d97706; margin-top: 10px; display: none; }
+.sub { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tile { padding: 14px; border-radius: 12px; border: 1px solid var(--border); }
+.tile-v { font-size: 22px; font-weight: 650; } .tile-k { font-size: 12px; color: var(--muted); }
+.panel-h { font-weight: 650; margin-bottom: 6px; }
+ul.list, ol.list { margin: 0; padding-left: 0; list-style: none; }
+.list li { padding: 7px 0; border-bottom: 1px dashed var(--border); }
+.list li:last-child { border-bottom: 0; }
+ol.list { list-style: decimal; padding-left: 20px; }
+.arrow { display: inline-block; width: 20px; font-size: 11px; } .up { color: #dc2626; } .down { color: #059669; }
+.muted { color: var(--muted); }
+details { margin-top: 14px; }
+summary { cursor: pointer; font-weight: 600; }
+.sliders { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 14px; }
+.slider label { display: flex; justify-content: space-between; font-size: 14px; }
+.slider output { font-weight: 650; color: var(--accent); }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+.btn { margin-top: 12px; font: inherit; font-size: 13px; padding: 7px 14px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--card); color: var(--text); }
+.chart { margin-top: 14px; }
+.chart svg { width: 100%; height: 220px; display: block; }
+.foot { font-size: 12px; color: var(--muted); text-align: center; padding-top: 18px; }
+.foot a { color: var(--accent); }
+.loading { text-align: center; padding: 40px; color: var(--muted); }
+@media (max-width: 760px) {
+  .controls, .grid2, .grid-eq, .sliders, .ship-row { grid-template-columns: 1fr; }
+  .risk-value { font-size: 52px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div class="kicker">Port congestion risk · <span id="lead">24</span> h ahead</div>
+    <h1>Will this ship wait for a berth?</h1>
+    <p>Pick a US port and an arriving ship. The model reads the port as it stood 24 hours before arrival, gives the
+      chance of waiting more than 24 hours, how sure it is, why, and what a planner can still do.</p>
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <div id="app" class="loading">Loading ships and model…</div>
+</div>
+
+<template id="tpl">
+  <div class="controls">
+    <div class="card">
+      <label class="lbl" for="port">Port</label>
+      <div class="hint">US port the ship is heading to</div>
+      <select id="port"></select>
+    </div>
+    <div class="card">
+      <span class="lbl">Show</span>
+      <div class="hint">Filter by what actually happened</div>
+      <div class="seg" id="show">
+        <button data-v="all" class="on">All arrivals</button>
+        <button data-v="long">Waited over 24 h</button>
+        <button data-v="quick">Berthed within 24 h</button>
+      </div>
+    </div>
+  </div>
+  <div class="card ship">
+    <label class="lbl" for="ship">Arriving ship</label>
+    <div class="hint">Held-out arrivals (10–31 Oct 2021), newest first. Type to search by date, size or MMSI.</div>
+    <div class="ship-row">
+      <input type="search" id="q" placeholder="Search, e.g. tanker, 300 m, 23 Oct">
+      <select id="ship"></select>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card" id="risk"></div>
+    <div class="card" id="context"></div>
+  </div>
+  <div class="grid-eq">
+    <div class="card"><div class="panel-h">Why</div><ul class="list" id="why"></ul></div>
+    <div class="card"><div class="panel-h">What to do now</div><ol class="list" id="todo"></ol></div>
+  </div>
+
+  <details class="card">
+    <summary>What if conditions were different?</summary>
+    <div class="sliders">
+      <div class="slider"><label>Ships waiting <output id="o-waiting"></output></label>
+        <input type="range" id="s-waiting" min="0" step="1"></div>
+      <div class="slider"><label>Max gust, past 24 h (kn) <output id="o-gust"></output></label>
+        <input type="range" id="s-gust" min="0" max="70" step="1"></div>
+      <div class="slider"><label>Median wait this week (h) <output id="o-recent"></output></label>
+        <input type="range" id="s-recent" min="0" step="1"></div>
+    </div>
+    <button class="btn" id="reset">Reset to actual conditions</button>
+  </details>
+
+  <div class="card chart">
+    <div class="panel-h" id="chart-title">Ships waiting at the port</div>
+    <div class="sub">Counted 24 h before each arrival, Aug – Oct 2021. The dashed line marks the selected ship.</div>
+    <div id="chart"></div>
+  </div>
+
+  <div class="foot">Historical replay on NOAA AIS data (Aug 2019 – Oct 2021) with Open-Meteo weather; scoring new ships
+    live needs a live AIS feed. Predictions use only what was known 24 h before arrival.
+    <a href="https://github.com/NirmanPatel036/port-congestion-risk" target="_blank" rel="noopener">Code on GitHub</a></div>
+</template>
+
+<script src="model.js"></script>
+<script>
+(function () {
+  var D, M, ships = [], cur = null, show = "all";
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
+  var fmt = function (v, d, unit) { return v === null || v === undefined ? "–" : v.toFixed(d) + (unit || ""); };
+
+  function band(p) { return p >= 0.6 ? ["high", "High risk"] : p >= 0.3 ? ["mid", "Elevated risk"] : ["low", "Low risk"]; }
+
+  function outcome(s) {
+    var w = s.wait_h === null ? "unknown" : Math.round(s.wait_h) + " h";
+    if (s.censored) return "Still waiting after " + w + " when the data ends";
+    return "Actually waited " + w + (s.congested ? " — congested" : " — on time");
+  }
+
+  function riskCard(s, r, whatif) {
+    var b = band(r.prob);
+    $("risk").className = "card band-" + b[0];
+    $("risk").innerHTML =
+      '<div class="risk-top"><span class="risk-kicker">Chance of waiting more than ' + D.meta.delay_h + ' h</span>' +
+      '<span class="risk-word">' + b[1] + '</span></div>' +
+      '<div class="risk-value">' + Math.round(r.prob * 100) + '%</div>' +
+      '<div class="bar"><span style="width:' + (r.prob * 100).toFixed(0) + '%"></span></div>' +
+      '<div class="pills"><span class="pill conf-' + r.conf + '" title="Spread between the 5 ensemble models: ' +
+      r.spread.toFixed(3) + '">' + r.conf + ' confidence</span><span class="pill">' + esc(outcome(s)) + '</span></div>' +
+      '<div class="whatif-note" style="display:' + (whatif ? "block" : "none") + '">What-if scenario: the reasons and ' +
+      'actions below still describe the actual conditions.</div>';
+  }
+
+  function context(s) {
+    var x = s.x, tiles = [
+      ["Ships waiting", fmt(x.waiting_now, 0)], ["Backlog", fmt(x.backlog_days, 1, " days")],
+      ["Recent median wait", fmt(x.recent_wait_h, 0, " h")], ["Max gust, past 24 h", fmt(x.gust_max_prev_24h_kn, 0, " kn")]];
+    $("context").innerHTML = '<div class="sub">Port conditions ' + D.meta.lead_h + ' h before the ship is due (' +
+      esc(s.due) + ')</div><div class="tiles">' + tiles.map(function (t) {
+        return '<div class="tile"><div class="tile-v">' + t[1] + '</div><div class="tile-k">' + t[0] + '</div></div>';
+      }).join("") + '</div>';
+  }
+
+  function reasons(s) {
+    var up = s.up.map(function (w) { return '<li><span class="arrow up">▲</span>' + esc(w) + '</li>'; }).join("");
+    var down = s.down.map(function (w) { return '<li><span class="arrow down">▼</span>' + esc(w) + '</li>'; }).join("");
+    $("why").innerHTML = (up || '<li class="muted">No strong risk drivers</li>') + down;
+    $("todo").innerHTML = (s.actions.length ? s.actions : ["Plan normally; no action needed."])
+      .map(function (a) { return "<li>" + esc(a) + "</li>"; }).join("");
+  }
+
+  function chart(port, t) {
+    var pts = D.queue[port], W = 1000, H = 220, P = { l: 40, r: 12, t: 10, b: 26 };
+    if (!pts || !pts.length) { $("chart").innerHTML = ""; return; }
+    var x0 = pts[0][0], x1 = pts[pts.length - 1][0], ymax = Math.max.apply(null, pts.map(function (p) { return p[1]; })) || 1;
+    var X = function (v) { return P.l + (v - x0) / (x1 - x0 || 1) * (W - P.l - P.r); };
+    var Y = function (v) { return H - P.b - v / ymax * (H - P.t - P.b); };
+    var line = pts.map(function (p, i) { return (i ? "L" : "M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1); }).join(" ");
+    var area = line + " L" + X(x1).toFixed(1) + " " + Y(0) + " L" + X(x0).toFixed(1) + " " + Y(0) + " Z";
+    var ticks = [0, Math.round(ymax / 2), ymax].map(function (v) {
+      return '<text x="' + (P.l - 6) + '" y="' + (Y(v) + 4) + '" text-anchor="end" font-size="11" fill="currentColor" opacity=".6">' + v + '</text>' +
+        '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" stroke="currentColor" opacity=".08"/>';
+    }).join("");
+    var months = [], d = new Date(x0); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + 1);
+    for (; d.getTime() <= x1; d.setUTCMonth(d.getUTCMonth() + 1)) {
+      months.push('<text x="' + X(d.getTime()) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="11" fill="currentColor" opacity=".6">' +
+        d.toLocaleString("en", { month: "short", timeZone: "UTC" }) + '</text>');
+    }
+    var mark = t >= x0 && t <= x1 ? '<line x1="' + X(t) + '" x2="' + X(t) + '" y1="' + P.t + '" y2="' + Y(0) +
+      '" stroke="#ef4444" stroke-dasharray="4 4" stroke-width="1.5"/>' : "";
+    $("chart").innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="Ships waiting over time">' +
+      ticks + '<path d="' + area + '" fill="#14b8a6" opacity=".15"/><path d="' + line + '" fill="none" stroke="#0d9488" stroke-width="2"/>' +
+      mark + months.join("") + '</svg>';
+    $("chart-title").textContent = "Ships waiting at " + port;
+  }
+
+  function setSliders(s) {
+    var v = { waiting: s.x.waiting_now, gust: s.x.gust_max_prev_24h_kn, recent: s.x.recent_wait_h };
+    ["waiting", "gust", "recent"].forEach(function (k) {
+      $("s-" + k).value = Math.round(v[k] || 0); $("o-" + k).textContent = $("s-" + k).value;
+    });
+  }
+
+  function select(id) {
+    cur = ships.filter(function (s) { return s.id === id; })[0];
+    if (!cur) return;
+    riskCard(cur, { prob: cur.prob, conf: cur.conf, spread: cur.spread }, false);
+    context(cur); reasons(cur); setSliders(cur); chart(cur.port, cur.t);
+  }
+
+  function whatIf() {
+    if (!cur) return;
+    var x = Object.assign({}, cur.x);
+    x.waiting_now = +$("s-waiting").value; x.gust_max_prev_24h_kn = +$("s-gust").value; x.recent_wait_h = +$("s-recent").value;
+    x.backlog_days = PortModel.backlogDays(x.waiting_now, x.berths_7d);
+    ["waiting", "gust", "recent"].forEach(function (k) { $("o-" + k).textContent = $("s-" + k).value; });
+    riskCard(cur, PortModel.score(M, x), true);
+  }
+
+  function fillShips(keep) {
+    var port = $("port").value, q = $("q").value.trim().toLowerCase();
+    var list = ships.filter(function (s) {
+      return s.port === port && (show === "all" || (show === "long" ? s.congested === 1 : s.congested === 0)) &&
+        (!q || s.label.toLowerCase().indexOf(q) >= 0);
+    });
+    $("ship").innerHTML = list.length ? list.map(function (s) {
+      return '<option value="' + s.id + '">' + esc(s.label) + '</option>'; }).join("") :
+      '<option value="">No arrivals match</option>';
+    var still = keep && cur && list.some(function (s) { return s.id === cur.id; });
+    if (still) $("ship").value = cur.id; else if (list.length) select(list[0].id);
+  }
+
+  function start() {
+    $("app").className = ""; $("app").innerHTML = $("tpl").innerHTML;
+    $("lead").textContent = D.meta.lead_h;
+    $("chips").innerHTML = ["5 US ports", "AIS Aug 2019 – Oct 2021", D.meta.n_test.toLocaleString() + " unseen test arrivals"]
+      .concat(D.meta.roc_auc ? ["Test ROC-AUC " + D.meta.roc_auc.toFixed(2)] : [])
+      .map(function (c) { return "<span>" + esc(c) + "</span>"; }).join("");
+    ships = D.ships;
+    var ports = Object.keys(D.queue).sort();
+    $("port").innerHTML = ports.map(function (p) {
+      var n = ships.filter(function (s) { return s.port === p; }).length;
+      return '<option value="' + esc(p) + '">' + esc(p) + "  ·  " + n + " arrivals</option>"; }).join("");
+    $("s-waiting").max = D.meta.max_waiting; $("s-recent").max = D.meta.max_recent;
+    $("port").addEventListener("change", function () { $("q").value = ""; fillShips(false); });
+    $("q").addEventListener("input", function () { fillShips(true); });
+    $("ship").addEventListener("change", function () { if ($("ship").value) select(+$("ship").value); });
+    Array.prototype.forEach.call(document.querySelectorAll("#show button"), function (b) {
+      b.addEventListener("click", function () {
+        show = b.dataset.v;
+        Array.prototype.forEach.call(document.querySelectorAll("#show button"), function (o) { o.classList.toggle("on", o === b); });
+        fillShips(true);
+      });
+    });
+    ["waiting", "gust", "recent"].forEach(function (k) { $("s-" + k).addEventListener("input", whatIf); });
+    $("reset").addEventListener("click", function () { if (cur) select(cur.id); });
+    $("port").value = ports.indexOf("Los Angeles/Long Beach") >= 0 ? "Los Angeles/Long Beach" : ports[0];
+    fillShips(false);
+  }
+
+  Promise.all([fetch("data.json").then(function (r) { return r.json(); }), fetch("model.json").then(function (r) { return r.json(); })])
+    .then(function (res) { D = res[0]; M = res[1]; start(); })
+    .catch(function (e) { $("app").innerHTML = "Could not load the data: " + esc(e.message); });
+})();
+</script>
+</body>
+</html>
