@@ -40,6 +40,8 @@ Copy `models/`, `reports/` and `data/processed/features.parquet` back to your ma
 streamlit run app.py
 ```
 
+**Using the app:** pick a port in the sidebar, then pick an arriving ship from the held-out weeks (10-31 Oct 2021). Its features fill in automatically from AIS and weather data as they stood 24 h before arrival. You get the risk, a confidence level, the main reasons, suggested actions and what actually happened. Use "What if conditions were different?" to change the queue, gusts or recent waits and see the risk respond. Ships outside the dataset cannot be scored; that needs a live AIS feed.
+
 ## Assumptions
 
 - Congested means waiting more than 24 h between arriving in the port zone and reaching a berth, after subtracting the time needed to sail in at 10 kn.
