@@ -7,7 +7,6 @@ sdk: gradio
 sdk_version: 6.30.0
 python_version: "3.12"
 app_file: app.py
-suggested_hardware: zero-a10g
 pinned: false
 short_description: Will a ship wait over 24 h for a berth? Forecast 24 h ahead
 ---
