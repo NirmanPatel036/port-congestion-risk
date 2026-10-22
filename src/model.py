@@ -9,6 +9,7 @@ from .config import TEST_START, VAL_START
 from .features import FEATURES, RISING
 
 DEVICE = "cuda" if shutil.which("nvidia-smi") else "cpu"
+DEFAULT_CUTS = (0.05, 0.12)  # member disagreement: below the first is High, above the second is Low
 PARAMS = dict(n_estimators=400, learning_rate=0.03, max_depth=4, min_child_weight=5, subsample=0.8,
               colsample_bytree=0.8, tree_method="hist", eval_metric="logloss")
 
@@ -60,8 +61,12 @@ def predict(bundle, df):
     P = np.column_stack([m.predict_proba(X)[:, 1] for m in bundle["members"]])
     prob = bundle["calibrator"].predict_proba(logit(P.mean(1))[:, None])[:, 1]
     spread = P.std(1)
-    confidence = np.select([spread < 0.05, spread < 0.12], ["High", "Medium"], "Low")
-    return prob, spread, confidence
+    return prob, spread, confidence(spread, bundle.get("confidence_cuts", DEFAULT_CUTS))
+
+
+def confidence(spread, cuts):
+    """High / Medium / Low from how much the ensemble members disagree; cut-offs are tuned on validation."""
+    return np.select([spread < cuts[0], spread < cuts[1]], ["High", "Medium"], "Low")
 
 
 def contributions(bundle, df):

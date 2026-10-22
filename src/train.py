@@ -16,6 +16,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from .config import DELAY_H, LEAD_H, MODELS, PROCESSED, REPORTS, TEST_START, tag
+from .confidence import tune
 from .model import DEVICE, contributions, design, fit_ensemble, fit_xgb, predict, time_split
 
 
@@ -51,6 +52,8 @@ def main():
     print(f"device={DEVICE} fit={fit.sum()} calibrate={cal.sum()} test={test.sum()} congested={y.mean():.0%}")
 
     bundle = fit_ensemble(X[fit], y[fit], X[cal], y[cal])
+    cal_prob, cal_spread, _ = predict(bundle, df[cal])
+    bundle["confidence_cuts"] = tune(y[cal].to_numpy(), cal_prob, cal_spread)[0]  # validation only
     bundle["test_start"], bundle["lead_h"] = pd.Timestamp(TEST_START), lead_h
     bundle["train_from"] = args.train_from or str(df.arrival[fit].min().date())
     prob, spread, conf = predict(bundle, df[test])
@@ -69,6 +72,7 @@ def main():
         "xgboost ensemble (calibrated)": scores(yt, prob, prob >= 0.5),
         "confidence mix on test": pd.Series(conf).value_counts(normalize=True).round(2).to_dict(),
         "accuracy by confidence": {c: round(float(((prob >= 0.5) == yt)[conf == c].mean()), 3) for c in np.unique(conf)},
+        "confidence cut-offs (tuned on validation)": list(bundle["confidence_cuts"]),
         "calibration (test, 8 equal-size bins)": calibration(yt, prob),
     }
 
