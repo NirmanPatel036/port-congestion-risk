@@ -1,3 +1,9 @@
+try:  # Hugging Face ZeroGPU; must be imported before any package that could touch CUDA
+    import spaces
+    gpu = spaces.GPU(duration=10)
+except ImportError:  # running locally
+    spaces, gpu = None, (lambda f: f)
+
 import html
 import json
 
@@ -97,6 +103,7 @@ def advice(actions):
     return f'<div class="panel"><div class="panel-h">What to do now</div><ol class="list actions">{items}</ol></div>'
 
 
+@gpu  # on ZeroGPU each scoring call gets a short GPU slot; elsewhere this does nothing
 def render(i, waiting=None, gust=None, recent=None):
     if i is None:
         empty = '<div class="panel muted">No arrivals match this filter.</div>'
