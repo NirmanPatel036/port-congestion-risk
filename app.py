@@ -20,7 +20,9 @@ def load():
 
 bundle, df = load()
 st.title("Port congestion risk")
-st.caption(f"Chance that an arriving ship waits more than {DELAY_H} h for a berth, why, and what to do about it.")
+lead_h = bundle.get("lead_h", 0)
+st.caption(f"Forecast {lead_h} h before a ship arrives: the chance it waits more than {DELAY_H} h for a berth, "
+           "why, and what to do about it while there is still time.")
 
 port = st.sidebar.selectbox("Port", sorted(df.port.unique()))
 metrics_file = REPORTS / "metrics.json"
@@ -29,7 +31,7 @@ if metrics_file.exists():
     st.sidebar.caption(f"Test ROC-AUC {m['roc_auc']} | PR-AUC {m['pr_auc']} | Brier {m.get('brier')}")
 
 p = df[df.port == port].sort_values("arrival")
-st.subheader(f"Ships waiting at {port}")
+st.subheader(f"Ships waiting at {port}, {lead_h} h before each arrival")
 st.line_chart(p.set_index("arrival")["waiting_now"], height=220)
 
 test = p[p.arrival >= bundle["test_start"]]
@@ -45,7 +47,8 @@ base = row.iloc[0]
 
 with st.expander("What if conditions were different?"):
     row["waiting_now"] = st.slider("Ships waiting", 0, int(df.waiting_now.max()), int(base.waiting_now))
-    row["gust_max_24h_kn"] = st.slider("Max gust in next 24 h (kn)", 0, 60, int(np.nan_to_num(base.gust_max_24h_kn)))
+    row["gust_max_prev_24h_kn"] = st.slider("Max gust over the past 24 h (kn)", 0, 60,
+                                            int(np.nan_to_num(base.gust_max_prev_24h_kn)))
     row["recent_wait_h"] = st.slider("Median wait of ships berthed this week (h)", 0,
                                      int(np.nanmax(df.recent_wait_h)), int(np.nan_to_num(base.recent_wait_h)))
     row["backlog_days"] = backlog_days(row.waiting_now, row.berths_7d)

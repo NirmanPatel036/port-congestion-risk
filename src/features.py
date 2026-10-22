@@ -1,12 +1,14 @@
+import argparse
+
 import numpy as np
 import pandas as pd
 
-from .config import PROCESSED, START, TZ
+from .config import LEAD_H, PROCESSED, START, TZ, tag
 
 FEATURES = ["port", "waiting_now", "backlog_days", "arrivals_24h", "berths_7d", "at_berth_now", "recent_wait_h",
-            "gust_kn", "gust_max_24h_kn", "precip_24h_mm", "hour_local", "is_weekend", "length_m", "draft_m",
-            "is_tanker"]
-RISING = ["waiting_now", "backlog_days", "arrivals_24h", "recent_wait_h", "gust_max_24h_kn"]  # can only push risk up
+            "gust_kn", "gust_max_prev_24h_kn", "precip_prev_24h_mm", "hour_local", "is_weekend", "length_m",
+            "draft_m", "is_tanker"]
+RISING = ["waiting_now", "backlog_days", "arrivals_24h", "recent_wait_h", "gust_max_prev_24h_kn"]  # only push risk up
 DAY = np.timedelta64(1, "D")
 
 
@@ -16,8 +18,8 @@ def backlog_days(waiting, berths_7d):
 
 
 def port_state(g):
-    """What a port planner can see at each arrival moment, using only the past."""
-    t = g.arrival.values
+    """What a port planner can see at each call's cutoff time, counting only events before it."""
+    t = g.cutoff.values
     times = lambda col: np.sort(g[col].dropna().values)
     before = lambda s, x: np.searchsorted(s, x, side="left")
     arr, q_exit, b_in, b_out = times("arrival"), times("queue_exit"), times("berth_start"), times("berth_end")
@@ -39,17 +41,19 @@ def port_state(g):
 
 
 def add_weather(df, w):
+    # readings up to the cutoff only: each hourly value covers the hour before its timestamp
     w = w.sort_values(["port", "time"]).copy()
-    ahead = lambda s, how: getattr(s[::-1].rolling(24, min_periods=1), how)()[::-1]
-    w["gust_max_24h_kn"] = w.groupby("port").gust_kn.transform(lambda s: ahead(s, "max"))
-    w["precip_24h_mm"] = w.groupby("port").precip_mm.transform(lambda s: ahead(s, "sum"))
-    df["hour"] = df.arrival.dt.floor("h")
-    cols = ["port", "time", "gust_kn", "gust_max_24h_kn", "precip_24h_mm"]
+    past = lambda s, how: getattr(s.rolling(24, min_periods=1), how)()
+    w["gust_max_prev_24h_kn"] = w.groupby("port").gust_kn.transform(lambda s: past(s, "max"))
+    w["precip_prev_24h_mm"] = w.groupby("port").precip_mm.transform(lambda s: past(s, "sum"))
+    df["hour"] = df.cutoff.dt.floor("h")
+    cols = ["port", "time", "gust_kn", "gust_max_prev_24h_kn", "precip_prev_24h_mm"]
     return df.merge(w[cols], left_on=["port", "hour"], right_on=["port", "time"], how="left").drop(columns=["hour", "time"])
 
 
-def build(calls, weather):
+def build(calls, weather, lead_h=LEAD_H):
     calls = calls.sort_values("arrival", ignore_index=True)
+    calls["cutoff"] = calls.arrival - pd.Timedelta(hours=lead_h)  # the moment the prediction is made
     df = calls.join(pd.concat([port_state(g) for _, g in calls.groupby("port")]))
     df["backlog_days"] = backlog_days(df.waiting_now, df.berths_7d)
     df = add_weather(df, weather)
@@ -58,18 +62,24 @@ def build(calls, weather):
         local = df.loc[idx, "arrival"].dt.tz_localize("UTC").dt.tz_convert(TZ[port])
         df.loc[idx, "hour_local"] = local.dt.hour
         df.loc[idx, "is_weekend"] = (local.dt.dayofweek >= 5).astype(int)
+    # time of day and ship details come from the ETA and AIS voyage data, both known before arrival
     df["length_m"], df["draft_m"] = df.length, df.draft
     df["is_tanker"] = df.vtype.between(80, 89).astype(int)
 
-    warm = pd.Timestamp(START) + pd.Timedelta(days=7)  # rolling 7-day features need a week of history
+    # a week of history before the earliest cutoff; fixed so every lead time is scored on the same ships
+    warm = pd.Timestamp(START) + pd.Timedelta(days=7, hours=max(lead_h, LEAD_H))
     keep = df.labeled & (df.arrival >= warm)
     return df.loc[keep, ["mmsi", "arrival", "wait_h", "censored", "congested"] + FEATURES].reset_index(drop=True)
 
 
 def main():
-    df = build(pd.read_parquet(PROCESSED / "calls.parquet"), pd.read_parquet(PROCESSED / "weather.parquet"))
-    df.to_parquet(PROCESSED / "features.parquet", index=False)
-    print(df.shape, "\n", df.groupby("port").congested.agg(["size", "mean"]).round(2))
+    ap = argparse.ArgumentParser(description="Build features as seen LEAD hours before each arrival")
+    ap.add_argument("--lead-h", type=int, default=LEAD_H, help="0 = at arrival (baseline)")
+    lead_h = ap.parse_args().lead_h
+    df = build(pd.read_parquet(PROCESSED / "calls.parquet"), pd.read_parquet(PROCESSED / "weather.parquet"), lead_h)
+    out = PROCESSED / f"features{tag(lead_h)}.parquet"
+    df.to_parquet(out, index=False)
+    print(out.name, df.shape, "\n", df.groupby("port").congested.agg(["size", "mean"]).round(2))
 
 
 if __name__ == "__main__":

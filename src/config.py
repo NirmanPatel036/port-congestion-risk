@@ -35,3 +35,9 @@ JUMP_KM = 1            # a bigger move between pings means the ship relocated wh
 NEW_VISIT_GAP_H = 24
 APPROACH_KNOTS = 10    # time to sail from zone edge to berth is not counted as waiting
 DELAY_H = 24           # congested = waited more than a day for a berth
+LEAD_H = 24            # predict this many hours before the ship arrives; 0 gives the arrival-time baseline
+
+
+def tag(lead_h):
+    """File-name suffix: the main model has none, other lead times are kept side by side."""
+    return "" if lead_h == LEAD_H else f"_lead{lead_h}h"

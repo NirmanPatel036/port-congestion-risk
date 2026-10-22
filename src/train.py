@@ -1,3 +1,4 @@
+import argparse
 import json
 
 import joblib
@@ -14,7 +15,7 @@ from sklearn.metrics import average_precision_score, brier_score_loss, f1_score,
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from .config import DELAY_H, MODELS, PROCESSED, REPORTS
+from .config import DELAY_H, LEAD_H, MODELS, PROCESSED, REPORTS, tag
 from .model import DEVICE, contributions, design, fit_ensemble, fit_xgb, predict
 
 
@@ -25,10 +26,21 @@ def scores(y, score, pred):
     return {k: round(float(v), 3) for k, v in out.items()}
 
 
+def calibration(y, prob, bins=8):
+    """Predicted vs observed rate in equal-size bins; the mean gap is the expected calibration error."""
+    observed, predicted = calibration_curve(y, prob, n_bins=bins, strategy="quantile")
+    return {"predicted": predicted.round(3).tolist(), "observed": observed.round(3).tolist(),
+            "mean |gap|": round(float(np.abs(observed - predicted).mean()), 3)}
+
+
 def main():
+    ap = argparse.ArgumentParser(description="Train and evaluate on features built LEAD hours before arrival")
+    ap.add_argument("--lead-h", type=int, default=LEAD_H, help="0 = at arrival (baseline)")
+    lead_h = ap.parse_args().lead_h
+    sfx = tag(lead_h)
     MODELS.mkdir(exist_ok=True)
     (REPORTS / "figures").mkdir(parents=True, exist_ok=True)
-    df = pd.read_parquet(PROCESSED / "features.parquet").sort_values("arrival", ignore_index=True)
+    df = pd.read_parquet(PROCESSED / f"features{sfx}.parquet").sort_values("arrival", ignore_index=True)
     y = df.congested.astype(int)
     X = design(df)
 
@@ -39,7 +51,7 @@ def main():
     print(f"device={DEVICE} fit={fit.sum()} calibrate={cal.sum()} test={test.sum()} congested={y.mean():.0%}")
 
     bundle = fit_ensemble(X[fit], y[fit], X[cal], y[cal])
-    bundle["test_start"] = test_start
+    bundle["test_start"], bundle["lead_h"] = test_start, lead_h
     prob, spread, conf = predict(bundle, df[test])
 
     logreg = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(max_iter=2000))
@@ -49,12 +61,14 @@ def main():
 
     yt = y[test].to_numpy()
     results = {
+        "prediction lead (h before arrival)": lead_h,
         f"base rate (waits > {DELAY_H} h)": round(float(yt.mean()), 3),
         "rule: backlog > 1 day": scores(yt, backlog, backlog > 1),
         "logistic regression": scores(yt, lr_prob, lr_prob >= 0.5),
         "xgboost ensemble (calibrated)": scores(yt, prob, prob >= 0.5),
         "confidence mix on test": pd.Series(conf).value_counts(normalize=True).round(2).to_dict(),
         "accuracy by confidence": {c: round(float(((prob >= 0.5) == yt)[conf == c].mean()), 3) for c in np.unique(conf)},
+        "calibration (test, 8 equal-size bins)": calibration(yt, prob),
     }
 
     per_port = {}
@@ -74,27 +88,27 @@ def main():
             lopo[port] = round(float(roc_auc_score(y[held], m.predict_proba(Xp[held])[:, 1])), 3)
     results["leave-one-port-out roc_auc"] = lopo
 
-    joblib.dump(bundle, MODELS / "model.joblib")
-    (REPORTS / "metrics.json").write_text(json.dumps(results, indent=2))
+    joblib.dump(bundle, MODELS / f"model{sfx}.joblib")
+    (REPORTS / f"metrics{sfx}.json").write_text(json.dumps(results, indent=2))
     print(json.dumps(results, indent=2))
 
-    frac, mean_p = calibration_curve(yt, prob, n_bins=8, strategy="quantile")
+    cal_bins = results["calibration (test, 8 equal-size bins)"]
     plt.figure(figsize=(4.5, 4.5))
     plt.plot([0, 1], [0, 1], "--", color="grey")
-    plt.plot(mean_p, frac, "o-")
+    plt.plot(cal_bins["predicted"], cal_bins["observed"], "o-")
     plt.xlabel("predicted probability")
     plt.ylabel("observed share congested")
-    plt.title("Calibration (test period)")
+    plt.title(f"Calibration (test period, {lead_h} h ahead)")
     plt.tight_layout()
-    plt.savefig(REPORTS / "figures" / "calibration.png", dpi=150)
+    plt.savefig(REPORTS / "figures" / f"calibration{sfx}.png", dpi=150)
 
     imp = contributions(bundle, df[test]).abs().mean().sort_values()
     plt.figure(figsize=(6, 5))
     imp.plot.barh()
     plt.xlabel("mean |contribution| to log-odds")
-    plt.title("What drives the predictions")
+    plt.title(f"What drives the predictions ({lead_h} h ahead)")
     plt.tight_layout()
-    plt.savefig(REPORTS / "figures" / "drivers.png", dpi=150)
+    plt.savefig(REPORTS / "figures" / f"drivers{sfx}.png", dpi=150)
 
 
 if __name__ == "__main__":
