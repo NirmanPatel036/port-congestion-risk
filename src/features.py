@@ -54,7 +54,9 @@ def add_weather(df, w):
 def build(calls, weather, lead_h=LEAD_H):
     calls = calls.sort_values("arrival", ignore_index=True)
     calls["cutoff"] = calls.arrival - pd.Timedelta(hours=lead_h)  # the moment the prediction is made
-    df = calls.join(pd.concat([port_state(g) for _, g in calls.groupby("port")]))
+    if "period" not in calls:
+        calls["period"] = START
+    df = calls.join(pd.concat([port_state(g) for _, g in calls.groupby(["period", "port"])]))
     df["backlog_days"] = backlog_days(df.waiting_now, df.berths_7d)
     df = add_weather(df, weather)
 
@@ -66,10 +68,11 @@ def build(calls, weather, lead_h=LEAD_H):
     df["length_m"], df["draft_m"] = df.length, df.draft
     df["is_tanker"] = df.vtype.between(80, 89).astype(int)
 
-    # a week of history before the earliest cutoff; fixed so every lead time is scored on the same ships
-    warm = pd.Timestamp(START) + pd.Timedelta(days=7, hours=max(lead_h, LEAD_H))
+    # a week of history before the earliest cutoff in each period; fixed so every lead time scores the same ships
+    warm = pd.to_datetime(df.period) + pd.Timedelta(days=7, hours=max(lead_h, LEAD_H))
     keep = df.labeled & (df.arrival >= warm)
-    return df.loc[keep, ["mmsi", "arrival", "wait_h", "censored", "congested"] + FEATURES].reset_index(drop=True)
+    cols = ["mmsi", "period", "arrival", "label_time", "wait_h", "censored", "congested"]
+    return df.loc[keep, cols + FEATURES].reset_index(drop=True)
 
 
 def main():

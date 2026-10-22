@@ -15,8 +15,8 @@ from sklearn.metrics import average_precision_score, brier_score_loss, f1_score,
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from .config import DELAY_H, LEAD_H, MODELS, PROCESSED, REPORTS, tag
-from .model import DEVICE, contributions, design, fit_ensemble, fit_xgb, predict
+from .config import DELAY_H, LEAD_H, MODELS, PROCESSED, REPORTS, TEST_START, tag
+from .model import DEVICE, contributions, design, fit_ensemble, fit_xgb, predict, time_split
 
 
 def scores(y, score, pred):
@@ -36,7 +36,9 @@ def calibration(y, prob, bins=8):
 def main():
     ap = argparse.ArgumentParser(description="Train and evaluate on features built LEAD hours before arrival")
     ap.add_argument("--lead-h", type=int, default=LEAD_H, help="0 = at arrival (baseline)")
-    lead_h = ap.parse_args().lead_h
+    ap.add_argument("--train-from", help="first arrival date used for training (default: all history)")
+    args = ap.parse_args()
+    lead_h = args.lead_h
     sfx = tag(lead_h)
     MODELS.mkdir(exist_ok=True)
     (REPORTS / "figures").mkdir(parents=True, exist_ok=True)
@@ -44,18 +46,17 @@ def main():
     y = df.congested.astype(int)
     X = design(df)
 
-    # split by time, never at random: the model only sees the past, like it would in production
-    test_start = df.arrival.quantile(0.75)
-    cal_start = df.arrival[df.arrival < test_start].quantile(0.8)
-    fit, cal, test = df.arrival < cal_start, (df.arrival >= cal_start) & (df.arrival < test_start), df.arrival >= test_start
+    # split by fixed dates, never at random: the model only sees the past, like it would in production
+    fit, cal, test = time_split(df, args.train_from)
     print(f"device={DEVICE} fit={fit.sum()} calibrate={cal.sum()} test={test.sum()} congested={y.mean():.0%}")
 
     bundle = fit_ensemble(X[fit], y[fit], X[cal], y[cal])
-    bundle["test_start"], bundle["lead_h"] = test_start, lead_h
+    bundle["test_start"], bundle["lead_h"] = pd.Timestamp(TEST_START), lead_h
+    bundle["train_from"] = args.train_from or str(df.arrival[fit].min().date())
     prob, spread, conf = predict(bundle, df[test])
 
     logreg = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(max_iter=2000))
-    logreg.fit(X[~test], y[~test])
+    logreg.fit(X[fit | cal], y[fit | cal])
     lr_prob = logreg.predict_proba(X[test])[:, 1]
     backlog = df.backlog_days[test].to_numpy()
 

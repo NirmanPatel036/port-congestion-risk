@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 
-from .config import (APPROACH_KNOTS, BERTH_SPREAD_M, DELAY_H, END, JUMP_KM, MIN_BERTH_H, NEW_VISIT_GAP_H, PORTS,
-                     PROCESSED, RAW, START, STOP_KNOTS)
+from .config import (APPROACH_KNOTS, BERTH_SPREAD_M, DELAY_H, JUMP_KM, MIN_BERTH_H, NEW_VISIT_GAP_H, PERIODS, PORTS,
+                     PROCESSED, RAW, STOP_KNOTS)
 
 KM_PER_NM = 1.852
 H = pd.Timedelta(hours=1)
@@ -14,8 +14,10 @@ def km_between(lat1, lon1, lat2, lon2):
     return 6371 * 2 * np.arcsin(np.sqrt(a))
 
 
-def load_pings():
-    df = pd.concat((pd.read_parquet(p) for p in sorted(RAW.glob("*.parquet"))), ignore_index=True)
+def load_pings(port=None, days=None):
+    files = sorted(RAW.glob("*.parquet")) if days is None else [RAW / f"{d:%Y-%m-%d}.parquet" for d in days]
+    filters = None if port is None else [("port", "==", port)]  # one port at a time keeps memory low
+    df = pd.concat((pd.read_parquet(p, filters=filters) for p in files), ignore_index=True)
     return df.rename(columns={"MMSI": "mmsi", "BaseDateTime": "t", "LAT": "lat", "LON": "lon", "SOG": "sog",
                               "Status": "status", "VesselType": "vtype", "Length": "length", "Draft": "draft"})
 
@@ -87,6 +89,7 @@ def label(v, start, end):
     plat, plon = v.port.map(lambda p: PORTS[p][0]), v.port.map(lambda p: PORTS[p][1])
     sail_h = km_between(v.lat0, v.lon0, v.berth_lat.fillna(plat), v.berth_lon.fillna(plon)) / (APPROACH_KNOTS * KM_PER_NM)
     v["wait_h"] = ((v.berth_start.fillna(end) - v.arrival).dt.total_seconds() / 3600 - sail_h).clip(lower=0)
+    v["sail_h"] = sail_h
 
     berthed = v.berth_start.notna()
     v["censored"] = ~berthed & (v["last"] >= end - 6 * H)  # still waiting when the data ends
@@ -95,7 +98,13 @@ def label(v, start, end):
     v["congested"] = np.where(v.berth_start.notna() | (v.censored & (v.wait_h > DELAY_H)),
                               (v.wait_h > DELAY_H).astype(float), np.nan)
     v.loc[v.berth_start.isna() & ~v.censored, "wait_h"] = np.nan
-    v["labeled"] = v.congested.notna() & ~v.starts_berthed & (v.arrival >= start + NEW_VISIT_GAP_H * H)
+    # the outcome is settled at berthing, or once the ship has waited past the threshold
+    settles = v.arrival + pd.to_timedelta(v.sail_h + DELAY_H, unit="h")
+    v["label_time"] = settles.where(v.congested == 1, v.berth_start)
+    # label only ships that arrived early enough for either outcome to be seen before the data ends;
+    # otherwise quick berthings near the end are kept and long waits dropped, biasing towards "not congested"
+    v["labeled"] = (v.congested.notna() & ~v.starts_berthed & (v.arrival >= start + NEW_VISIT_GAP_H * H)
+                    & (settles <= end))
     v["queue_exit"] = v.berth_start.fillna(v["last"])
     return v.reset_index(drop=True)
 
@@ -109,9 +118,19 @@ def build_calls(pings, start, end):
 
 def main():
     PROCESSED.mkdir(parents=True, exist_ok=True)
-    calls = build_calls(load_pings(), pd.Timestamp(START), pd.Timestamp(END) + pd.Timedelta(days=1))
+    days = {s: pd.date_range(s, e, freq="D") for s, e in PERIODS}
+    missing = [f"{d:%Y-%m-%d}" for ds in days.values() for d in ds if not (RAW / f"{d:%Y-%m-%d}.parquet").exists()]
+    if missing:  # a missing day would look like every ship leaving and coming back
+        raise SystemExit(f"{len(missing)} AIS days missing, e.g. {missing[:5]}; rerun python -m src.ais")
+    parts = []
+    for s, e in PERIODS:
+        for port in PORTS:
+            c = build_calls(load_pings(port, days[s]), pd.Timestamp(s), pd.Timestamp(e) + pd.Timedelta(days=1))
+            parts.append(c.assign(period=s))
+            print(f"{s}..{e} {port}: {len(c)} visits", flush=True)
+    calls = pd.concat(parts, ignore_index=True)
     calls.to_parquet(PROCESSED / "calls.parquet", index=False)
-    summary = calls[calls.labeled].groupby("port").agg(calls=("mmsi", "size"), congested_rate=("congested", "mean"),
+    summary = calls[calls.labeled].groupby(["period", "port"]).agg(calls=("mmsi", "size"), congested_rate=("congested", "mean"),
                                                        median_wait_h=("wait_h", "median"))
     print(f"{len(calls)} visits, {calls.labeled.sum()} labeled\n{summary.round(2)}")
 

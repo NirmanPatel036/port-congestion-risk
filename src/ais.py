@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from .config import AIS_URL, END, MIN_LENGTH_M, PORTS, RAW, START
+from .config import AIS_URL, MIN_LENGTH_M, PERIODS, PORTS, RAW
 
 COLS = ["MMSI", "BaseDateTime", "LAT", "LON", "SOG", "Status", "VesselType", "Length", "Draft"]
 
@@ -51,13 +51,16 @@ def _fetch_day(day):
 
 def main():
     ap = argparse.ArgumentParser(description="Download NOAA AIS days and keep ships near the study ports")
-    ap.add_argument("--start", default=START)
-    ap.add_argument("--end", default=END)
+    ap.add_argument("--start", help="default: every day in config.PERIODS")
+    ap.add_argument("--end")
     ap.add_argument("--workers", type=int, default=4)
     args = ap.parse_args()
 
     RAW.mkdir(parents=True, exist_ok=True)
-    days = pd.date_range(args.start, args.end, freq="D")
+    if args.start:
+        days = pd.date_range(args.start, args.end or args.start, freq="D")
+    else:
+        days = pd.DatetimeIndex([d for s, e in PERIODS for d in pd.date_range(s, e, freq="D")])
     with ProcessPoolExecutor(args.workers) as pool:
         for name, n in pool.map(fetch_day, days):
             print(name, n, flush=True)

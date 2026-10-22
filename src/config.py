@@ -25,7 +25,13 @@ TZ = {
     "New York/New Jersey": "America/New_York",
 }
 
-START, END ="2021-08-01", "2021-10-31"  # before LA/LB moved its queue 150 nm offshore (Nov 2021)
+# AIS periods, each processed on its own so no visit spans a gap. Nothing after Oct 2021: in mid-Nov 2021
+# LA/LB moved its queue 150 nm offshore, out of these zones, so waits there would look short.
+PERIODS = [("2019-08-01", "2019-10-31"),   # a normal year, before the backlog
+           ("2020-08-01", "2021-10-31")]   # backlog builds up and peaks
+START, END = PERIODS[0][0], PERIODS[-1][1]
+# fixed split dates so every model is validated and tested on the same weeks
+VAL_START, TEST_START = "2021-09-27", "2021-10-10"
 
 MIN_LENGTH_M = 100     # ocean-going cargo ships and tankers, not tugs or barges
 STOP_KNOTS = 0.5

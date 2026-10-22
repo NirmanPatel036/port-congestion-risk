@@ -5,6 +5,7 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from xgboost import DMatrix, XGBClassifier
 
+from .config import TEST_START, VAL_START
 from .features import FEATURES, RISING
 
 DEVICE = "cuda" if shutil.which("nvidia-smi") else "cpu"
@@ -19,6 +20,18 @@ def design(df, columns=None, with_port=True):
         X = pd.get_dummies(X, columns=["port"], dtype=float)
     X = X.astype(float)
     return X if columns is None else X.reindex(columns=columns, fill_value=0.0)
+
+
+def time_split(df, train_from=None):
+    """Fixed-date train / validation / test masks. A row is dropped from a split if its outcome only became
+    known after the next split began: in production that label would not exist yet (embargo)."""
+    val_start, test_start = pd.Timestamp(VAL_START), pd.Timestamp(TEST_START)
+    train = (df.arrival < val_start) & (df.label_time < val_start)
+    if train_from is not None:
+        train &= df.arrival >= pd.Timestamp(train_from)
+    val = (df.arrival >= val_start) & (df.arrival < test_start) & (df.label_time < test_start)
+    test = df.arrival >= test_start
+    return train.to_numpy(), val.to_numpy(), test.to_numpy()
 
 
 def logit(p):
