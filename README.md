@@ -6,13 +6,25 @@ Data: NOAA Marine Cadastre AIS for Aug-Oct 2019 (a normal year) and Aug 2020-Oct
 
 ## How it works
 
+```mermaid
+flowchart LR
+    A[NOAA AIS pings] --> B[ais.py<br/>filter ships near 5 ports]
+    B --> C[calls.py<br/>port calls, waits, labels]
+    W[Open-Meteo weather] --> D
+    C --> D[features.py<br/>port state 24 h before arrival]
+    D --> E[train.py<br/>calibrated XGBoost ensemble<br/>+ confidence cut-offs]
+    E --> F[(models/model.joblib)]
+    F --> G[app.py<br/>Gradio app on Hugging Face Spaces]
+    D --> G
+```
+
 1. **`src/ais.py`** downloads each day of AIS and keeps cargo ships and tankers over 100 m within each port's zone.
 2. **`src/calls.py`** turns pings into port calls: when the ship arrived, when it reached a berth, and how long it waited.
    A ship counts as berthed when it sits still (90% of pings within 50 m) for 2+ h; anchored ships swing 100-350 m. Movement is trusted over the crew-entered AIS status, which is often wrong.
 3. **`src/weather.py`** fetches hourly wind, gusts and rain for each port.
 4. **`src/features.py`** describes what a planner could see **24 h before the ship arrives**, while there is still time to slow-steam or re-plan: ships waiting, berth throughput in the last 7 days, backlog in days (queue / berthing rate), recent waits, weather observed over the past 24 h, the ship's ETA (local time, weekday) and vessel size. Only events before that cutoff are counted. `--lead-h 0` builds the same features at the moment of arrival, kept as a baseline.
-5. **`src/train.py`** trains on arrivals before 27 Sep 2021, calibrates on 27 Sep-9 Oct and tests on 10-31 Oct 2021 (fixed dates in `src/config.py`). It compares a one-line rule, logistic regression and a calibrated ensemble of 5 XGBoost models. The spread across the 5 models is the confidence score. **`src/compare.py`** prints the 24 h-ahead model next to the arrival-time baseline. **`src/experiment.py`** checks whether more history helps: learning curves, the current Aug-Sep 2021 model against all history on the same test weeks, new vessels, and 95% intervals.
-6. **`app.py`** is a Streamlit demo: pick a port and a ship to see the risk, the reasons, the suggested actions and what actually happened. You can also change conditions to see how the risk responds.
+5. **`src/train.py`** trains on arrivals before 27 Sep 2021, calibrates on 27 Sep-9 Oct and tests on 10-31 Oct 2021 (fixed dates in `src/config.py`). It compares a one-line rule, logistic regression and a calibrated ensemble of 5 XGBoost models. The spread across the 5 models is the confidence score.
+6. **`app.py`** is a Gradio demo, deployable to Hugging Face Spaces: pick a port and a ship to see the risk, the reasons, the suggested actions and what actually happened. You can also change conditions to see how the risk responds.
 
 ## Run
 
@@ -28,8 +40,6 @@ python -m src.features              # 24 h before arrival (main model)
 python -m src.features --lead-h 0    # at arrival (baseline)
 python -m src.train
 python -m src.train --lead-h 0
-python -m src.compare
-python -m src.experiment             # in a notebook: %run -m src.experiment to see the plots
 ```
 
 Quick trial on fewer days: `python -m src.ais --start 2021-09-01 --end 2021-09-21`.
@@ -37,10 +47,12 @@ Quick trial on fewer days: `python -m src.ais --start 2021-09-01 --end 2021-09-2
 Copy `models/`, `reports/` and `data/processed/features.parquet` back to your machine, then:
 
 ```bash
-streamlit run app.py
+python app.py                     # opens at http://127.0.0.1:7860
 ```
 
-**Using the app:** pick a port in the sidebar, then pick an arriving ship from the held-out weeks (10-31 Oct 2021). Its features fill in automatically from AIS and weather data as they stood 24 h before arrival. You get the risk, a confidence level, the main reasons, suggested actions and what actually happened. Use "What if conditions were different?" to change the queue, gusts or recent waits and see the risk respond. Ships outside the dataset cannot be scored; that needs a live AIS feed.
+Deploy to Hugging Face Spaces: `space/build.sh` assembles the app, code, model and data into `../port-congestion-space`; upload that folder to a Gradio Space.
+
+**Using the app:** pick a port (optionally filter by outcome), then pick an arriving ship from the held-out weeks (10-31 Oct 2021). Its features fill in automatically from AIS and weather data as they stood 24 h before arrival. You get the risk, a confidence level, the main reasons, suggested actions and what actually happened. Use "What if conditions were different?" to change the queue, gusts or recent waits and see the risk respond. Ships outside the dataset cannot be scored; that needs a live AIS feed.
 
 ## Assumptions
 
