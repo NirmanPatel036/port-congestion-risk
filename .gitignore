@@ -9,5 +9,4 @@ tests/
 # report-only scripts, not used by the app
 src/compare.py
 src/experiment.py
-models/
 reports/
