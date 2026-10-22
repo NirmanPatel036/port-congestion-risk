@@ -286,7 +286,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
   function start() {
     $("app").className = ""; $("app").innerHTML = $("tpl").innerHTML;
     $("lead").textContent = D.meta.lead_h;
-    $("chips").innerHTML = ["5 US ports", "AIS Aug 2019 – Oct 2021", D.meta.n_test.toLocaleString() + " unseen test arrivals"]
+    $("chips").innerHTML = ["5 US ports", "AIS Aug 2019 – Oct 2021", "Model runs in your browser"]
       .concat(D.meta.roc_auc ? ["Test ROC-AUC " + D.meta.roc_auc.toFixed(2)] : [])
       .map(function (c) { return "<span>" + esc(c) + "</span>"; }).join("");
     ships = D.ships;

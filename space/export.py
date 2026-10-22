@@ -1,6 +1,3 @@
-"""Export everything the static demo needs: one JSON with the test ships (scored with the real model) and the
-model itself as plain trees, so the browser can redo the what-if predictions. Checks the tree copy matches
-XGBoost before writing. Usage: python -m space.export <output folder>"""
 import json
 import re
 import sys
